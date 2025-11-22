@@ -71,7 +71,16 @@ namespace LoneEftDmaRadar.Tarkov.GameWorld
                     if (namePtr == 0)
                         continue;
 
-                    var name = Memory.ReadUtf8String(namePtr, 128, false);
+                    string name;
+                    try
+                    {
+                        name = Memory.ReadUtf8String(namePtr, 128, false);
+                    }
+                    catch
+                    {
+                        // Pointer occasionally goes stale between raids; skip this entry and keep scanning.
+                        continue;
+                    }
                     
                     if (!string.IsNullOrEmpty(name))
                     {
@@ -120,6 +129,7 @@ namespace LoneEftDmaRadar.Tarkov.GameWorld
             catch (Exception ex)
             {
                 DebugLogger.LogException(ex, "CameraManager.TryInitialize");
+                Reset();
                 return false;
             }
         }
