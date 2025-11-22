@@ -588,6 +588,11 @@ namespace LoneEftDmaRadar
         [JsonPropertyName("espPlayerFaction")]
         public bool EspPlayerFaction { get; set; } = false;
         /// <summary>
+        /// Color PMCs by faction (USEC/BEAR) when group colors are disabled.
+        /// </summary>
+        [JsonPropertyName("espFactionColors")]
+        public bool EspFactionColors { get; set; } = true;
+        /// <summary>
         /// Color hostile human players by group.
         /// </summary>
         [JsonPropertyName("espGroupColors")]

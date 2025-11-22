@@ -637,11 +637,15 @@ namespace LoneEftDmaRadar.UI.ESP
                     });
                 }
 
-                if (player.PlayerSide == Enums.EPlayerSide.Bear)
-                    return SKPaints.PaintPMCBear;
-                if (player.PlayerSide == Enums.EPlayerSide.Usec)
-                    return SKPaints.PaintPMCUsec;
-                return SKPaints.PaintAimviewWidgetPMC;
+                if (App.Config.UI.EspFactionColors)
+                {
+                    if (player.PlayerSide == Enums.EPlayerSide.Bear)
+                        return SKPaints.PaintPMCBear;
+                    if (player.PlayerSide == Enums.EPlayerSide.Usec)
+                        return SKPaints.PaintPMCUsec;
+                }
+
+                return SKPaints.PaintPMC;
             }
 
             return player.Type switch
