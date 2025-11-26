@@ -25,6 +25,13 @@
                 Command="{Binding ToggleDebugConsoleCommand}"
                 ToolTip="Shows or hides the console-based DebugLogger output." />
 
+        <Button Content="Run IL2CPP Offset Dumper"
+                Width="200"
+                Height="36"
+                Margin="0,8,0,0"
+                Command="{Binding RunIl2CppDumperCommand}"
+                ToolTip="Runs the IL2CPP offset dumper and logs results to the debug console." />
+
         <GroupBox Header="DeviceAimbot Aimbot Debug"
                   Margin="0,12,0,0"
                   Width="380">

@@ -1,6 +1,7 @@
 using LoneEftDmaRadar;
 using LoneEftDmaRadar.DMA;
 using LoneEftDmaRadar.UI.Misc;
+using LoneEftDmaRadar.Tarkov.IL2CPP;
 using System;
 using System.ComponentModel;
 using System.Text;
@@ -18,6 +19,7 @@ namespace LoneEftDmaRadar.UI.Radar.ViewModels
         public DebugTabViewModel()
         {
             ToggleDebugConsoleCommand = new SimpleCommand(DebugLogger.Toggle);
+            RunIl2CppDumperCommand = new SimpleCommand(RunIl2CppDumper);
 
             _timer = new DispatcherTimer
             {
@@ -29,6 +31,7 @@ namespace LoneEftDmaRadar.UI.Radar.ViewModels
         }
 
         public ICommand ToggleDebugConsoleCommand { get; }
+        public ICommand RunIl2CppDumperCommand { get; }
 
         public bool ShowDeviceAimbotDebug
         {
@@ -53,6 +56,19 @@ namespace LoneEftDmaRadar.UI.Radar.ViewModels
                     _DeviceAimbotDebugText = value;
                     OnPropertyChanged(nameof(DeviceAimbotDebugText));
                 }
+            }
+        }
+
+        private void RunIl2CppDumper()
+        {
+            try
+            {
+                // Run the quick test - it will output to DebugLogger
+                DumperExample.QuickTest();
+            }
+            catch (Exception ex)
+            {
+                DebugLogger.LogException(ex, "RunIl2CppDumper");
             }
         }
 
