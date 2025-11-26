@@ -137,25 +137,41 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
                     return;
                 }
 
-                var domain = _memory.ReadValue<Il2CppDomain>(_il2cppDomain);
-                DebugLogger.LogDebug($"Assembly Count: {domain.AssemblyCount}");
+                var assembliesArray = _il2cppDomain;
+                uint assemblyIndex = 0;
+                const uint MAX_ASSEMBLIES = 500;
 
-                // Iterate through all assemblies
-                for (uint i = 0; i < domain.AssemblyCount; i++)
+                // Iterate through assemblies array (null-terminated)
+                while (assemblyIndex < MAX_ASSEMBLIES)
                 {
-                    var assemblyPtr = _memory.ReadPtr(domain.Assemblies + (i * 8));
-                    if (assemblyPtr == 0) continue;
+                    var assemblyPtr = _memory.ReadPtr(assembliesArray + (assemblyIndex * 8));
+                    if (assemblyPtr == 0) break; // End of array
 
                     var assembly = _memory.ReadValue<Il2CppAssembly>(assemblyPtr);
-                    if (assembly.Image == 0) continue;
+                    if (assembly.Image == 0)
+                    {
+                        assemblyIndex++;
+                        continue;
+                    }
 
                     var image = _memory.ReadValue<Il2CppImage>(assembly.Image);
+                    if (image.Name == 0)
+                    {
+                        assemblyIndex++;
+                        continue;
+                    }
+
                     string imageName = _memory.ReadUtf8String(image.Name, 128);
 
                     if (!imageName.Equals(assemblyName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        assemblyIndex++;
                         continue;
+                    }
 
+                    // Found the target assembly
                     DebugLogger.LogInfo($"Found assembly: {imageName}");
+                    DebugLogger.LogInfo($"Assembly Ptr: 0x{assemblyPtr:X}");
                     DebugLogger.LogInfo($"Image Address: 0x{assembly.Image:X}");
                     DebugLogger.LogInfo($"Type Count: {image.TypeCount}");
                     DebugLogger.LogInfo($"Type Start Index: {image.TypeStart}");
@@ -164,10 +180,20 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
                     // Read assembly name info if available
                     if (assembly.AName != 0)
                     {
-                        var asmName = _memory.ReadValue<Il2CppAssemblyName>(assembly.AName);
-                        string name = _memory.ReadUtf8String(asmName.Name, 128);
-                        DebugLogger.LogInfo($"Assembly Full Name: {name}");
-                        DebugLogger.LogInfo($"Version: {asmName.Major}.{asmName.Minor}.{asmName.Build}.{asmName.Revision}");
+                        try
+                        {
+                            var asmName = _memory.ReadValue<Il2CppAssemblyName>(assembly.AName);
+                            if (asmName.Name != 0)
+                            {
+                                string name = _memory.ReadUtf8String(asmName.Name, 128);
+                                DebugLogger.LogInfo($"Assembly Full Name: {name}");
+                                DebugLogger.LogInfo($"Version: {asmName.Major}.{asmName.Minor}.{asmName.Build}.{asmName.Revision}");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            DebugLogger.LogDebug($"Could not read assembly name info: {ex.Message}");
+                        }
                     }
 
                     DebugLogger.LogInfo($"\nNote: Full class enumeration requires Il2CppMetadataRegistration");
@@ -199,34 +225,79 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
                     return;
                 }
 
-                var domain = _memory.ReadValue<Il2CppDomain>(_il2cppDomain);
-                DebugLogger.LogInfo($"Total Assemblies: {domain.AssemblyCount}\n");
+                // _il2cppDomain points to the assemblies array (pointer to Il2CppAssembly**)
+                // We iterate until we hit a null pointer (null-terminated array)
+                var assembliesArray = _il2cppDomain;
 
-                // Iterate through all assemblies
-                for (uint i = 0; i < domain.AssemblyCount; i++)
+                uint assemblyIndex = 0;
+                uint validAssemblies = 0;
+                const uint MAX_ASSEMBLIES = 500; // Safety limit
+
+                DebugLogger.LogInfo("Iterating through assemblies array (null-terminated)...\n");
+
+                // Iterate through pointer array until we hit null
+                while (assemblyIndex < MAX_ASSEMBLIES)
                 {
                     try
                     {
-                        var assemblyPtr = _memory.ReadPtr(domain.Assemblies + (i * 8));
-                        if (assemblyPtr == 0) continue;
+                        // Read pointer to Il2CppAssembly from the array
+                        var assemblyPtr = _memory.ReadPtr(assembliesArray + (assemblyIndex * 8));
 
+                        // If we hit a null pointer, we've reached the end
+                        if (assemblyPtr == 0)
+                        {
+                            DebugLogger.LogDebug($"Hit null pointer at index {assemblyIndex}, end of assemblies");
+                            break;
+                        }
+
+                        // Try to read the assembly structure
                         var assembly = _memory.ReadValue<Il2CppAssembly>(assemblyPtr);
-                        if (assembly.Image == 0) continue;
 
+                        // Validate the assembly has an image
+                        if (assembly.Image == 0)
+                        {
+                            assemblyIndex++;
+                            continue;
+                        }
+
+                        // Read the image data
                         var image = _memory.ReadValue<Il2CppImage>(assembly.Image);
+
+                        // Validate image name pointer
+                        if (image.Name == 0)
+                        {
+                            assemblyIndex++;
+                            continue;
+                        }
+
+                        // Read the assembly name
                         string imageName = _memory.ReadUtf8String(image.Name, 128);
 
-                        DebugLogger.LogInfo($"[{i}] {imageName}");
+                        // Filter out invalid/empty names
+                        if (string.IsNullOrWhiteSpace(imageName))
+                        {
+                            assemblyIndex++;
+                            continue;
+                        }
+
+                        // This is a valid assembly
+                        validAssemblies++;
+                        DebugLogger.LogInfo($"[{validAssemblies}] {imageName}");
                         DebugLogger.LogInfo($"    Type Count: {image.TypeCount}");
+                        DebugLogger.LogInfo($"    Type Start: {image.TypeStart}");
+                        DebugLogger.LogInfo($"    Assembly Index: {image.AssemblyIndex}");
                         DebugLogger.LogInfo($"    Image: 0x{assembly.Image:X}");
+                        DebugLogger.LogInfo($"    Assembly Ptr: 0x{assemblyPtr:X}\n");
                     }
                     catch (Exception ex)
                     {
-                        DebugLogger.LogDebug($"Error reading assembly {i}: {ex.Message}");
+                        DebugLogger.LogDebug($"Error reading assembly at index {assemblyIndex}: {ex.Message}");
                     }
+
+                    assemblyIndex++;
                 }
 
-                DebugLogger.LogInfo("\n=== Assembly Dump Complete ===");
+                DebugLogger.LogInfo($"\n=== Assembly Dump Complete: Found {validAssemblies} valid assemblies ===");
             }
             catch (Exception ex)
             {
@@ -571,18 +642,30 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
 
                 DebugLogger.LogDebug($"Searching for class '{namespaceName}.{className}'...");
 
-                var domain = _memory.ReadValue<Il2CppDomain>(_il2cppDomain);
+                var assembliesArray = _il2cppDomain;
+                uint assemblyIndex = 0;
+                const uint MAX_ASSEMBLIES = 500;
 
-                // Iterate through all assemblies
-                for (uint i = 0; i < domain.AssemblyCount; i++)
+                // Iterate through all assemblies (null-terminated array)
+                while (assemblyIndex < MAX_ASSEMBLIES)
                 {
-                    var assemblyPtr = _memory.ReadPtr(domain.Assemblies + (i * 8));
-                    if (assemblyPtr == 0) continue;
+                    var assemblyPtr = _memory.ReadPtr(assembliesArray + (assemblyIndex * 8));
+                    if (assemblyPtr == 0) break; // End of array
 
                     var assembly = _memory.ReadValue<Il2CppAssembly>(assemblyPtr);
-                    if (assembly.Image == 0) continue;
+                    if (assembly.Image == 0)
+                    {
+                        assemblyIndex++;
+                        continue;
+                    }
 
                     var image = _memory.ReadValue<Il2CppImage>(assembly.Image);
+                    if (image.Name == 0)
+                    {
+                        assemblyIndex++;
+                        continue;
+                    }
+
                     string imageName = _memory.ReadUtf8String(image.Name, 128);
 
                     // For now, linear search through types
@@ -593,6 +676,8 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
                         DebugLogger.LogDebug($"Found class in assembly '{imageName}'");
                         return classPtr;
                     }
+
+                    assemblyIndex++;
                 }
 
                 DebugLogger.LogDebug($"Class not found in any assembly");
