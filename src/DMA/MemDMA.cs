@@ -667,6 +667,26 @@ namespace LoneEftDmaRadar.DMA
         }
 
         /// <summary>
+        /// Find signature in a specific module
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ulong FindSignatureInModule(string signature, string moduleName)
+        {
+            if (!_vmm.Map_GetModuleFromName(_pid, moduleName, out var info))
+                throw new VmmException($"Failed to get module information for {moduleName}.");
+            return _vmm.FindSignature(_pid, signature, info.vaBase, info.vaBase + info.cbImageSize);
+        }
+
+        /// <summary>
+        /// Get module base address
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ulong GetModuleBase(string moduleName)
+        {
+            return _vmm.ProcessGetModuleBase(_pid, moduleName);
+        }
+
+        /// <summary>
         /// Throws a special exception if no longer in game.
         /// </summary>
         /// <exception cref="ProcessNotRunningException"></exception>

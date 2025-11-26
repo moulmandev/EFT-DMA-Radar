@@ -136,10 +136,13 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
                 if (dumper.Initialize())
                 {
                     DebugLogger.LogInfo("✓ Dumper initialized successfully!");
-                    DebugLogger.LogInfo("Ready to dump offsets.");
+                    DebugLogger.LogInfo("Ready to dump offsets.\n");
 
-                    // Try dumping one class as a test
-                    dumper.DumpClass("GameWorld", "EFT");
+                    // Dump all assemblies first to see what's loaded
+                    dumper.DumpAllAssemblies();
+
+                    // Try dumping Assembly-CSharp details
+                    dumper.DumpAssembly("Assembly-CSharp.dll");
                 }
                 else
                 {
@@ -150,6 +153,44 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
             catch (Exception ex)
             {
                 DebugLogger.LogException(ex, "QuickTest");
+            }
+        }
+
+        /// <summary>
+        /// Extended test that attempts to dump class information
+        /// </summary>
+        public static void ExtendedTest()
+        {
+            try
+            {
+                DebugLogger.LogInfo("\n=== IL2CPP Dumper Extended Test ===\n");
+
+                var dumper = new Il2CppOffsetDumper();
+
+                if (!dumper.Initialize())
+                {
+                    DebugLogger.LogError("Failed to initialize dumper");
+                    return;
+                }
+
+                // First, see all assemblies
+                DebugLogger.LogInfo("Step 1: Listing all assemblies...");
+                dumper.DumpAllAssemblies();
+
+                // Dump specific assembly details
+                DebugLogger.LogInfo("\nStep 2: Dumping Assembly-CSharp details...");
+                dumper.DumpAssembly("Assembly-CSharp.dll");
+
+                // Try to dump specific classes (will fail until FindClass is fully implemented)
+                DebugLogger.LogInfo("\nStep 3: Attempting to dump specific classes...");
+                dumper.DumpClass("GameWorld", "EFT");
+                dumper.DumpClass("Player", "EFT");
+
+                DebugLogger.LogInfo("\n=== Extended Test Complete ===");
+            }
+            catch (Exception ex)
+            {
+                DebugLogger.LogException(ex, "ExtendedTest");
             }
         }
     }

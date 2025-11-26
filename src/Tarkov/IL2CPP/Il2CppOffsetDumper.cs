@@ -15,6 +15,8 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
         private readonly MemDMA _memory;
         private ulong _gameAssemblyBase;
         private ulong _il2cppDomain;
+        private ulong _metadataRegistration;
+        private ulong _codeRegistration;
 
         public Il2CppOffsetDumper()
         {
@@ -50,6 +52,18 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
                 }
 
                 DebugLogger.LogInfo($"IL2CPP Domain: 0x{_il2cppDomain:X}");
+
+                // Try to find metadata registration (optional, for advanced features)
+                _metadataRegistration = FindMetadataRegistration();
+                if (_metadataRegistration != 0)
+                {
+                    DebugLogger.LogInfo($"IL2CPP MetadataRegistration: 0x{_metadataRegistration:X}");
+                }
+                else
+                {
+                    DebugLogger.LogWarning("MetadataRegistration not found - class dumping will be limited");
+                }
+
                 DebugLogger.LogInfo("Initialization successful!");
 
                 return true;
@@ -110,6 +124,12 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
             {
                 DebugLogger.LogInfo($"\n=== Dumping Assembly: {assemblyName} ===");
 
+                if (_il2cppDomain == 0)
+                {
+                    DebugLogger.LogError("IL2CPP domain not initialized");
+                    return;
+                }
+
                 var domain = _memory.ReadValue<Il2CppDomain>(_il2cppDomain);
                 DebugLogger.LogDebug($"Assembly Count: {domain.AssemblyCount}");
 
@@ -129,11 +149,22 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
                         continue;
 
                     DebugLogger.LogInfo($"Found assembly: {imageName}");
+                    DebugLogger.LogInfo($"Image Address: 0x{assembly.Image:X}");
                     DebugLogger.LogInfo($"Type Count: {image.TypeCount}");
+                    DebugLogger.LogInfo($"Type Start Index: {image.TypeStart}");
+                    DebugLogger.LogInfo($"Assembly Index: {image.AssemblyIndex}");
 
-                    // Note: Full assembly dump would iterate through all types
-                    // For POC, we'll just log the assembly info
-                    DebugLogger.LogInfo($"Assembly dump complete. Use DumpClass() for specific classes.");
+                    // Read assembly name info if available
+                    if (assembly.AName != 0)
+                    {
+                        var asmName = _memory.ReadValue<Il2CppAssemblyName>(assembly.AName);
+                        string name = _memory.ReadUtf8String(asmName.Name, 128);
+                        DebugLogger.LogInfo($"Assembly Full Name: {name}");
+                        DebugLogger.LogInfo($"Version: {asmName.Major}.{asmName.Minor}.{asmName.Build}.{asmName.Revision}");
+                    }
+
+                    DebugLogger.LogInfo($"\nNote: Full class enumeration requires Il2CppMetadataRegistration");
+                    DebugLogger.LogInfo($"Use DumpClass() if you know the specific class name.");
 
                     return;
                 }
@@ -143,6 +174,56 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
             catch (Exception ex)
             {
                 DebugLogger.LogException(ex, $"DumpAssembly({assemblyName})");
+            }
+        }
+
+        /// <summary>
+        /// Dump all assemblies loaded in the domain
+        /// </summary>
+        public void DumpAllAssemblies()
+        {
+            try
+            {
+                DebugLogger.LogInfo("\n=== Dumping All Assemblies ===");
+
+                if (_il2cppDomain == 0)
+                {
+                    DebugLogger.LogError("IL2CPP domain not initialized");
+                    return;
+                }
+
+                var domain = _memory.ReadValue<Il2CppDomain>(_il2cppDomain);
+                DebugLogger.LogInfo($"Total Assemblies: {domain.AssemblyCount}\n");
+
+                // Iterate through all assemblies
+                for (uint i = 0; i < domain.AssemblyCount; i++)
+                {
+                    try
+                    {
+                        var assemblyPtr = _memory.ReadPtr(domain.Assemblies + (i * 8));
+                        if (assemblyPtr == 0) continue;
+
+                        var assembly = _memory.ReadValue<Il2CppAssembly>(assemblyPtr);
+                        if (assembly.Image == 0) continue;
+
+                        var image = _memory.ReadValue<Il2CppImage>(assembly.Image);
+                        string imageName = _memory.ReadUtf8String(image.Name, 128);
+
+                        DebugLogger.LogInfo($"[{i}] {imageName}");
+                        DebugLogger.LogInfo($"    Type Count: {image.TypeCount}");
+                        DebugLogger.LogInfo($"    Image: 0x{assembly.Image:X}");
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugLogger.LogDebug($"Error reading assembly {i}: {ex.Message}");
+                    }
+                }
+
+                DebugLogger.LogInfo("\n=== Assembly Dump Complete ===");
+            }
+            catch (Exception ex)
+            {
+                DebugLogger.LogException(ex, "DumpAllAssemblies");
             }
         }
 
@@ -174,14 +255,19 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
         {
             try
             {
-                // Try to find GameAssembly.dll using signature scanning
-                // This is a simplified POC - actual implementation may vary
                 DebugLogger.LogDebug("Searching for GameAssembly.dll...");
 
-                // For POC, we return 0 to demonstrate the structure
-                // Actual implementation would scan memory or use process module list
-                DebugLogger.LogWarning("GameAssembly.dll lookup not fully implemented in POC");
-                return 0;
+                // Use MemDMA to get module base
+                var gameAssemblyBase = _memory.GetModuleBase("GameAssembly.dll");
+
+                if (gameAssemblyBase == 0)
+                {
+                    DebugLogger.LogError("GameAssembly.dll not found in process modules");
+                    return 0;
+                }
+
+                DebugLogger.LogDebug($"Found GameAssembly.dll at 0x{gameAssemblyBase:X}");
+                return gameAssemblyBase;
             }
             catch (Exception ex)
             {
@@ -194,41 +280,113 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
         {
             try
             {
-                // Fallback: Use signature scanning for il2cpp_domain_get pattern
-                // This is a simplified approach - actual implementation would need game-specific patterns
-                DebugLogger.LogDebug("Using signature-based domain lookup...");
+                DebugLogger.LogDebug("Searching for IL2CPP domain...");
 
-                // Pattern for il2cpp domain access (game-specific, needs updating)
-                const string domainPattern = "48 8B 05 ?? ?? ?? ?? 48 85 C0 74 ?? 48 8B 40 ??";
-
-                try
+                // Try multiple signature patterns for IL2CPP domain
+                string[] patterns = new[]
                 {
-                    var signatureAddr = _memory.FindSignature(domainPattern);
-                    if (signatureAddr != 0)
-                    {
-                        int rva = _memory.ReadValue<int>(signatureAddr + 3);
-                        var domainPtr = signatureAddr + 7 + (ulong)rva;
-                        var domain = _memory.ReadPtr(domainPtr);
+                    "48 8B 05 ?? ?? ?? ?? 48 85 C0 74 ?? 48 8B 40 ??", // Common pattern
+                    "48 8B 0D ?? ?? ?? ?? 48 85 C9 74 ?? 48 8B 41 ??", // Alternative pattern
+                    "48 89 5C 24 ?? 57 48 83 EC 20 48 8B 05 ?? ?? ?? ??", // Domain get function start
+                };
 
-                        if (domain != 0)
+                foreach (var pattern in patterns)
+                {
+                    try
+                    {
+                        DebugLogger.LogDebug($"Trying pattern: {pattern}");
+                        var signatureAddr = _memory.FindSignatureInModule(pattern, "GameAssembly.dll");
+
+                        if (signatureAddr != 0)
                         {
-                            DebugLogger.LogDebug($"Found domain via signature: 0x{domain:X}");
-                            return domain;
+                            DebugLogger.LogDebug($"Found signature at 0x{signatureAddr:X}");
+
+                            // Read RVA from the instruction
+                            int rva = _memory.ReadValue<int>(signatureAddr + 3);
+                            var domainPtr = signatureAddr + 7 + (ulong)rva;
+
+                            DebugLogger.LogDebug($"Domain pointer at 0x{domainPtr:X}");
+
+                            var domain = _memory.ReadPtr(domainPtr);
+
+                            if (domain != 0)
+                            {
+                                DebugLogger.LogInfo($"Found IL2CPP domain at 0x{domain:X}");
+                                return domain;
+                            }
+                            else
+                            {
+                                DebugLogger.LogDebug("Domain pointer was null, trying next pattern");
+                            }
                         }
                     }
-                }
-                catch (Exception ex)
-                {
-                    DebugLogger.LogDebug($"Signature scan failed: {ex.Message}");
+                    catch (Exception ex)
+                    {
+                        DebugLogger.LogDebug($"Pattern failed: {ex.Message}");
+                    }
                 }
 
-                // If signature fails, return 0 - this indicates the pattern needs to be updated
-                DebugLogger.LogWarning("Could not locate IL2CPP domain - signatures may need updating");
+                DebugLogger.LogWarning("Could not locate IL2CPP domain with any known pattern");
+                DebugLogger.LogWarning("You may need to update the signature patterns for this game version");
                 return 0;
             }
             catch (Exception ex)
             {
                 DebugLogger.LogException(ex, "FindIl2CppDomain");
+                return 0;
+            }
+        }
+
+        private ulong FindMetadataRegistration()
+        {
+            try
+            {
+                DebugLogger.LogDebug("Searching for IL2CPP MetadataRegistration...");
+
+                // MetadataRegistration is typically referenced in il2cpp_init or il2cpp_codegen_register
+                string[] patterns = new[]
+                {
+                    // Pattern for MetadataRegistration access in il2cpp_codegen_register
+                    "48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ??",
+                    // Alternative pattern
+                    "48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20 48 8B 0D ?? ?? ?? ??",
+                    // Another common pattern
+                    "48 8B 0D ?? ?? ?? ?? 48 85 C9 74 ?? 48 8B 01",
+                };
+
+                foreach (var pattern in patterns)
+                {
+                    try
+                    {
+                        DebugLogger.LogDebug($"Trying MetadataRegistration pattern: {pattern.Substring(0, Math.Min(30, pattern.Length))}...");
+                        var signatureAddr = _memory.FindSignatureInModule(pattern, "GameAssembly.dll");
+
+                        if (signatureAddr != 0)
+                        {
+                            DebugLogger.LogDebug($"Found potential MetadataRegistration reference at 0x{signatureAddr:X}");
+
+                            // Try to resolve the RVA
+                            int rva = _memory.ReadValue<int>(signatureAddr + 3);
+                            var metadataPtr = signatureAddr + 7 + (ulong)rva;
+
+                            // MetadataRegistration is a structure, not a pointer
+                            // So we return the address directly
+                            DebugLogger.LogDebug($"MetadataRegistration structure at 0x{metadataPtr:X}");
+                            return metadataPtr;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugLogger.LogDebug($"MetadataRegistration pattern failed: {ex.Message}");
+                    }
+                }
+
+                DebugLogger.LogDebug("Could not locate MetadataRegistration automatically");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                DebugLogger.LogDebug($"FindMetadataRegistration error: {ex.Message}");
                 return 0;
             }
         }
@@ -239,6 +397,8 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
             {
                 if (_il2cppDomain == 0)
                     return 0;
+
+                DebugLogger.LogDebug($"Searching for class '{namespaceName}.{className}'...");
 
                 var domain = _memory.ReadValue<Il2CppDomain>(_il2cppDomain);
 
@@ -252,17 +412,50 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
                     if (assembly.Image == 0) continue;
 
                     var image = _memory.ReadValue<Il2CppImage>(assembly.Image);
+                    string imageName = _memory.ReadUtf8String(image.Name, 128);
 
-                    // Search for class in this image
-                    // Note: Actual implementation would use the image's class hash table
-                    // For POC, we demonstrate the structure
+                    // For now, linear search through types
+                    // TODO: Use hash table for better performance
+                    var classPtr = SearchClassesInImage(image, className, namespaceName);
+                    if (classPtr != 0)
+                    {
+                        DebugLogger.LogDebug($"Found class in assembly '{imageName}'");
+                        return classPtr;
+                    }
                 }
 
+                DebugLogger.LogDebug($"Class not found in any assembly");
                 return 0;
             }
             catch (Exception ex)
             {
                 DebugLogger.LogException(ex, "FindClass");
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// Search for a class within an image by iterating through all type definitions
+        /// This is a simplified linear search - production code would use Il2Cpp's hash tables
+        /// </summary>
+        private ulong SearchClassesInImage(Il2CppImage image, string className, string namespaceName)
+        {
+            try
+            {
+                // In IL2CPP, each image has a TypeStart index and TypeCount
+                // The actual type definitions are stored in a global array
+                // For now, this is a stub - full implementation requires reading the global metadata
+
+                DebugLogger.LogDebug($"Searching {image.TypeCount} types in image...");
+
+                // Note: This requires access to Il2CppMetadataRegistration which contains
+                // the types array. This is more complex and requires additional signature scanning.
+
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                DebugLogger.LogDebug($"Error searching classes: {ex.Message}");
                 return 0;
             }
         }

@@ -154,5 +154,74 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
             [FieldOffset(0x8)]
             public uint AssemblyCount;
         }
+
+        /// <summary>
+        /// Il2CppMetadataRegistration - contains global metadata arrays
+        /// This structure varies between Unity/IL2CPP versions
+        /// </summary>
+        [StructLayout(LayoutKind.Explicit)]
+        public struct Il2CppMetadataRegistration
+        {
+            [FieldOffset(0x0)]
+            public ulong GenericClasses; // Il2CppGenericClass**
+
+            [FieldOffset(0x8)]
+            public int GenericClassesCount;
+
+            [FieldOffset(0x10)]
+            public ulong GenericInsts; // Il2CppGenericInst**
+
+            [FieldOffset(0x18)]
+            public int GenericInstsCount;
+
+            [FieldOffset(0x20)]
+            public ulong GenericMethodTable; // Il2CppGenericMethodFunctionsDefinitions*
+
+            [FieldOffset(0x28)]
+            public int GenericMethodTableCount;
+
+            [FieldOffset(0x30)]
+            public ulong Types; // Il2CppType**
+
+            [FieldOffset(0x38)]
+            public int TypesCount;
+
+            [FieldOffset(0x40)]
+            public ulong MethodSpecs; // Il2CppMethodSpec*
+
+            [FieldOffset(0x48)]
+            public int MethodSpecsCount;
+        }
+
+        /// <summary>
+        /// Il2CppCodeRegistration - contains code-related metadata
+        /// </summary>
+        [StructLayout(LayoutKind.Explicit)]
+        public struct Il2CppCodeRegistration
+        {
+            [FieldOffset(0x0)]
+            public ulong MethodPointers; // void**
+
+            [FieldOffset(0x8)]
+            public int MethodPointersCount;
+
+            [FieldOffset(0x10)]
+            public ulong ReversePInvokeWrappers; // Il2CppMethodPointer*
+
+            [FieldOffset(0x18)]
+            public int ReversePInvokeWrappersCount;
+
+            [FieldOffset(0x20)]
+            public ulong GenericMethodPointers; // Il2CppMethodPointer*
+
+            [FieldOffset(0x28)]
+            public int GenericMethodPointersCount;
+
+            [FieldOffset(0x30)]
+            public ulong InvokerPointers; // InvokerMethod*
+
+            [FieldOffset(0x38)]
+            public int InvokerPointersCount;
+        }
     }
 }
