@@ -51,17 +51,24 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
                     return false;
                 }
 
-                DebugLogger.LogInfo($"IL2CPP Domain: 0x{_il2cppDomain:X}");
+                DebugLogger.LogInfo($"IL2CPP Domain/Assemblies: 0x{_il2cppDomain:X}");
+
+                // Try to find TYPE_INFO_TABLE (critical for class enumeration)
+                _typeInfoTable = FindTypeInfoTable();
+                if (_typeInfoTable != 0)
+                {
+                    DebugLogger.LogInfo($"TYPE_INFO_TABLE: 0x{_typeInfoTable:X}");
+                }
+                else
+                {
+                    DebugLogger.LogWarning("TYPE_INFO_TABLE not found - class dumping will be limited");
+                }
 
                 // Try to find metadata registration (optional, for advanced features)
                 _metadataRegistration = FindMetadataRegistration();
                 if (_metadataRegistration != 0)
                 {
                     DebugLogger.LogInfo($"IL2CPP MetadataRegistration: 0x{_metadataRegistration:X}");
-                }
-                else
-                {
-                    DebugLogger.LogWarning("MetadataRegistration not found - class dumping will be limited");
                 }
 
                 DebugLogger.LogInfo("Initialization successful!");
@@ -276,13 +283,30 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
             }
         }
 
+        private ulong _assembliesPtr = 0; // Direct pointer to assemblies array (alternative to domain)
+        private ulong _typeInfoTable = 0; // Global type info table
+
         private ulong FindIl2CppDomain()
         {
             try
             {
-                DebugLogger.LogDebug("Searching for IL2CPP domain...");
+                DebugLogger.LogDebug("Searching for IL2CPP assemblies...");
 
-                // Try multiple signature patterns for IL2CPP domain
+                // Approach 1: Try to find assemblies array directly (like reference implementation)
+                // Pattern: il2cpp_domain_get_assemblies function that does "mov rax, [rip+offset]"
+                var assembliesPtr = FindAssembliesArray();
+                if (assembliesPtr != 0)
+                {
+                    _assembliesPtr = assembliesPtr;
+                    DebugLogger.LogInfo($"✓ Found assemblies array at 0x{assembliesPtr:X}");
+
+                    // Create a fake domain structure for compatibility
+                    // We don't actually need the domain, just the assemblies pointer
+                    return assembliesPtr; // Return assemblies pointer as "domain"
+                }
+
+                // Approach 2: Try to find IL2CPP domain structure (original method)
+                DebugLogger.LogDebug("Trying domain-based approach...");
                 string[] patterns = new[]
                 {
                     "48 8B 05 ?? ?? ?? ?? 48 85 C0 74 ?? 48 8B 40 ??", // Common pattern
@@ -301,22 +325,51 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
                         {
                             DebugLogger.LogDebug($"Found signature at 0x{signatureAddr:X}");
 
-                            // Read RVA from the instruction
-                            int rva = _memory.ReadValue<int>(signatureAddr + 3);
-                            var domainPtr = signatureAddr + 7 + (ulong)rva;
-
-                            DebugLogger.LogDebug($"Domain pointer at 0x{domainPtr:X}");
-
-                            var domain = _memory.ReadPtr(domainPtr);
-
-                            if (domain != 0)
+                            try
                             {
-                                DebugLogger.LogInfo($"Found IL2CPP domain at 0x{domain:X}");
-                                return domain;
+                                // Calculate RVA offset based on pattern
+                                int rvaOffset = 3;
+                                int instructionEnd = 7;
+
+                                // Adjust for different patterns
+                                if (pattern.Contains("48 89 5C 24"))
+                                {
+                                    rvaOffset = 13;
+                                    instructionEnd = 17;
+                                }
+                                else if (pattern.Contains("48 8B 0D"))
+                                {
+                                    rvaOffset = 3;
+                                    instructionEnd = 7;
+                                }
+
+                                int rva = _memory.ReadValue<int>(signatureAddr + (ulong)rvaOffset);
+                                var domainPtr = signatureAddr + (ulong)instructionEnd + (ulong)rva;
+
+                                DebugLogger.LogDebug($"RVA offset: {rvaOffset}, RVA value: 0x{rva:X8}, Instruction end: {instructionEnd}");
+                                DebugLogger.LogDebug($"Calculated domain pointer at 0x{domainPtr:X}");
+
+                                // Validate range
+                                var minAddr = _gameAssemblyBase > 0x10000000 ? _gameAssemblyBase - 0x10000000 : 0;
+                                var maxAddr = _gameAssemblyBase + 0x10000000;
+
+                                if (domainPtr < minAddr || domainPtr > maxAddr)
+                                {
+                                    DebugLogger.LogDebug($"Domain pointer outside reasonable range, trying next pattern");
+                                    continue;
+                                }
+
+                                var domain = _memory.ReadPtr(domainPtr);
+
+                                if (domain != 0)
+                                {
+                                    DebugLogger.LogInfo($"✓ Found IL2CPP domain at 0x{domain:X}");
+                                    return domain;
+                                }
                             }
-                            else
+                            catch (Exception innerEx)
                             {
-                                DebugLogger.LogDebug("Domain pointer was null, trying next pattern");
+                                DebugLogger.LogDebug($"Error processing signature: {innerEx.Message}");
                             }
                         }
                     }
@@ -326,13 +379,70 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
                     }
                 }
 
-                DebugLogger.LogWarning("Could not locate IL2CPP domain with any known pattern");
+                DebugLogger.LogWarning("Could not locate IL2CPP domain/assemblies with any known pattern");
                 DebugLogger.LogWarning("You may need to update the signature patterns for this game version");
                 return 0;
             }
             catch (Exception ex)
             {
                 DebugLogger.LogException(ex, "FindIl2CppDomain");
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// Find the assemblies array directly (alternative to finding domain)
+        /// Reference pattern: "il2cpp_domain_get_assemblies -> mov rax, offset"
+        /// </summary>
+        private ulong FindAssembliesArray()
+        {
+            try
+            {
+                // Pattern for il2cpp_domain_get_assemblies function
+                // This function typically does: mov rax, [rip+offset] to load the assemblies array
+                string[] patterns = new[]
+                {
+                    "48 8B 05 ?? ?? ?? ?? C3", // mov rax, [rip+??]; ret
+                    "48 8B 05 ?? ?? ?? ?? 48 8B ?? C3", // mov rax, [rip+??]; mov ??, rax; ret
+                    "48 8B 05 ?? ?? ?? ?? 48 8B ?? ?? C3", // Similar with extra instructions
+                };
+
+                foreach (var pattern in patterns)
+                {
+                    try
+                    {
+                        var signatureAddr = _memory.FindSignatureInModule(pattern, "GameAssembly.dll");
+
+                        if (signatureAddr != 0)
+                        {
+                            DebugLogger.LogDebug($"Found assemblies pattern at 0x{signatureAddr:X}");
+
+                            // Read RVA from mov instruction (offset +3, instruction ends at +7)
+                            int rva = _memory.ReadValue<int>(signatureAddr + 3);
+                            var assembliesPtr = signatureAddr + 7 + (ulong)rva;
+
+                            DebugLogger.LogDebug($"Assemblies pointer at 0x{assembliesPtr:X}");
+
+                            // Validate by checking if we can read a pointer from this address
+                            var firstAssemblyPtr = _memory.ReadPtr(assembliesPtr);
+                            if (firstAssemblyPtr != 0)
+                            {
+                                DebugLogger.LogDebug($"First assembly at 0x{firstAssemblyPtr:X} (validation passed)");
+                                return assembliesPtr;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugLogger.LogDebug($"Assemblies pattern failed: {ex.Message}");
+                    }
+                }
+
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                DebugLogger.LogDebug($"FindAssembliesArray error: {ex.Message}");
                 return 0;
             }
         }
@@ -387,6 +497,67 @@ namespace LoneEftDmaRadar.Tarkov.IL2CPP
             catch (Exception ex)
             {
                 DebugLogger.LogDebug($"FindMetadataRegistration error: {ex.Message}");
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// Find the TYPE_INFO_TABLE (global array of Il2CppClass pointers)
+        /// Reference pattern: "48 89 05 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 8B 48" - mov offset, rax
+        /// </summary>
+        private ulong FindTypeInfoTable()
+        {
+            try
+            {
+                DebugLogger.LogDebug("Searching for TYPE_INFO_TABLE...");
+
+                // Pattern for TYPE_INFO_TABLE assignment
+                // The table is typically assigned with: mov [rip+offset], rax
+                string[] patterns = new[]
+                {
+                    "48 89 05 ?? ?? ?? ?? 48 8B 05", // mov [rip+??], rax; mov rax, [rip+...]
+                    "48 89 05 ?? ?? ?? ?? 48 8B", // mov [rip+??], rax; mov ...
+                    "48 89 0D ?? ?? ?? ?? 48 8B", // mov [rip+??], rcx; mov ...
+                };
+
+                foreach (var pattern in patterns)
+                {
+                    try
+                    {
+                        var signatureAddr = _memory.FindSignatureInModule(pattern, "GameAssembly.dll");
+
+                        if (signatureAddr != 0)
+                        {
+                            DebugLogger.LogDebug($"Found TYPE_INFO_TABLE pattern at 0x{signatureAddr:X}");
+
+                            // Read RVA from mov [rip+offset] instruction (offset +3, instruction ends at +7)
+                            int rva = _memory.ReadValue<int>(signatureAddr + 3);
+                            var typeInfoTablePtr = signatureAddr + 7 + (ulong)rva;
+
+                            DebugLogger.LogDebug($"TYPE_INFO_TABLE pointer at 0x{typeInfoTablePtr:X}");
+
+                            // Validate by trying to read the pointer
+                            var tableAddr = _memory.ReadPtr(typeInfoTablePtr);
+                            if (tableAddr != 0)
+                            {
+                                DebugLogger.LogInfo($"✓ Found TYPE_INFO_TABLE at 0x{typeInfoTablePtr:X}");
+                                _typeInfoTable = typeInfoTablePtr;
+                                return typeInfoTablePtr;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugLogger.LogDebug($"TYPE_INFO_TABLE pattern failed: {ex.Message}");
+                    }
+                }
+
+                DebugLogger.LogDebug("Could not locate TYPE_INFO_TABLE automatically");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                DebugLogger.LogDebug($"FindTypeInfoTable error: {ex.Message}");
                 return 0;
             }
         }
