@@ -7,14 +7,14 @@ namespace SDK
     {
         public readonly partial struct GameWorld
 		{
-			public const uint BtrController = 0x20; // EFT.Vehicle.BtrController
-			public const uint LocationId = 0xC8; // string
-			public const uint LootList = 0x190; // System.Collections.Generic.List<IKillable>
-			public const uint RegisteredPlayers = 0x1B0; // System.Collections.Generic.List<IPlayer>
-			public const uint MainPlayer = 0x208; // EFT.Player
-			public const uint SynchronizableObjectLogicProcessor = 0x240; // EFT.SynchronizableObjects.SynchronizableObjectLogicProcessor
-			public const uint Grenades = 0x280; // DictionaryListHydra<int, Throwable>
-            public const uint ExfiltrationController = 0x50; // EFT.Interactive.ExfiltrationController
+			public const uint BtrController = 0x28; // EFT.Vehicle.BtrController
+			public const uint LocationId = 0xD0; // string
+			public const uint LootList = 0x198; // System.Collections.Generic.List<IKillable>
+			public const uint RegisteredPlayers = 0x1B8; // System.Collections.Generic.List<IPlayer>
+			public const uint MainPlayer = 0x210; // EFT.Player
+			public const uint SynchronizableObjectLogicProcessor = 0x248; // EFT.SynchronizableObjects.SynchronizableObjectLogicProcessor
+			public const uint Grenades = 0x288; // DictionaryListHydra<int, Throwable>
+            public const uint ExfiltrationController = 0x58; // EFT.Interactive.ExfiltrationController
         }
 
         public readonly partial struct ExfiltrationTimerSoundPlayer
