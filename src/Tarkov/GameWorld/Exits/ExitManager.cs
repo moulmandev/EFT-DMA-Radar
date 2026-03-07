@@ -63,8 +63,7 @@ namespace LoneEftDmaRadar.Tarkov.GameWorld.Exits
             try
             {
                 var exfiltrationController = Memory.ReadPtr(_localGameWorld + Offsets.GameWorld.ExfiltrationController);
-                exfilArrayAddr = Memory.ReadPtr(exfiltrationController + (_isPMC ? Offsets.ExfiltrationTimerSoundPlayer._exfiltrationPoint : Offsets.HandlerExfiltration._exfiltrationPoint));
-
+                exfilArrayAddr = Memory.ReadPtr(exfiltrationController + (_isPMC ? 0x20u : 0x28u), false);
                 if (_isPMC)
                 {
                     entryPointPtr = Memory.ReadPtr(_localPlayer.Info + Offsets.PlayerInfo.EntryPoint);
